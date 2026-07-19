@@ -1,0 +1,15 @@
+# Core data handling
+xarray
+netCDF4
+pandas
+numpy
+
+# Plotting
+matplotlib
+cartopy       # for map plots with lat/lon projections (station locations, bias maps)
+
+# Stats (bias, RMSE, correlation etc.)
+scipy
+
+# Optional but handy for reading CDO output / calling CDO from Python
+cdo
