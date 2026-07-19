@@ -13,3 +13,6 @@ scipy
 
 # Optional but handy for reading CDO output / calling CDO from Python
 cdo
+
+# For downloading CHMI open data
+requests
