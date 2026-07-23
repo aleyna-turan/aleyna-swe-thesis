@@ -75,12 +75,55 @@ pull from when writing the methodology section in Overleaf later.
 
 ---
 
+## 2026-07-20 — Bias analysis complete (Step 5), core assignment done
+
+- Decided to do the statistics/analysis step in **R** instead of Python (more
+  comfortable working in R). Data hand-off between languages is trivial since
+  everything is plain CSV (`modelled_vs_observed_swe.csv.gz`) - no need to
+  redo the NetCDF/extraction work in R.
+- R environment: R 4.4.1 + RStudio, packages `dplyr`, `readr`, `ggplot2`.
+- Wrote `scripts/04_bias_analysis.R`:
+  - For each station: bias (mean of modelled - observed), RMSE, correlation,
+    n_obs, joined with metadata (lat/lon/elevation).
+  - Output: `results/tables/station_bias_metrics.csv` (1131 of 1147 stations
+    got valid metrics; 16 dropped/undefined correlation due to zero-variance
+    edge cases - e.g. stations with almost no real snow events recorded).
+  - Also made a diagnostic plot: bias vs. elevation
+    (`results/figures/bias_vs_elevation.png`).
+
+**Key results:**
+- Overall: mean bias ~0.2mm (negligible), mean RMSE ~11.3mm, mean
+  correlation ~0.83 (strong) - model tracks stations well overall.
+- **Important pattern found**: bias vs. elevation plot shows bias stays near
+  zero up to ~700-800m, then becomes increasingly **negative** above that
+  (model **under-predicts** snow at high-elevation/mountain stations,
+  reaching -100 to -180mm bias at the highest stations, ~1300-1500m).
+  - Likely explanation: grid cell size (~10-14km at 0.125deg) averages
+    together valley + peak elevations, so the model's effective elevation
+    for a mountain grid cell is lower than a specific high-altitude station
+    sitting at/near a peak - and snow accumulation is highly elevation-
+    sensitive. This is a known general limitation of gridded models at this
+    resolution in mountainous terrain, worth discussing in the thesis.
+  - This nuances the supervisor's original highlands-vs-lowlands framing:
+    the model gets the *spatial pattern* of where snow is right, but may be
+    getting the *magnitude* systematically wrong at the highest elevations
+    specifically.
+
+**Status check against supervisor's original email:**
+- [x] Station metadata table
+- [x] Extract modelled SWE at each station
+- [x] Calculate bias + other indicators
+- [ ] Meeting in early September (or sooner - now have real intermediate
+      results worth sharing, should message supervisor)
+- [ ] UIS assignment paperwork (comes after supervisor discussion)
+- [ ] ISIMIP3b SSP extension - explicitly a "possible future extension" in
+      the email, gated on supervisor confirming SWE was written out in those
+      runs. Not started, intentionally deferred.
+
+**Next planned steps:** possibly break down bias by elevation band into a
+clean summary table for the thesis; message supervisor with intermediate
+results ahead of September meeting.
+
+---
+
 ## Template for future entries
-
-```
-## YYYY-MM-DD — short title
-
-- What was done
-- What was decided and why
-- Open questions / blockers
-```
