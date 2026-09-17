@@ -1,0 +1,5 @@
+period,hy_first,hy_last,n_hydro_years,n_stations,n_station_years,obs_mean_swe_mm,obs_max_swe_mm,obs_dohy_max,obs_snow_duration_d,bias_max_swe_mm,rmse_max_swe_mm,r_max_swe,bias_dohy_max_d,bias_duration_d,n_trend_stations,maxswe_trend_obs_dec,maxswe_trend_mod_dec,maxswe_pct_sig_neg_obs,duration_trend_obs_dec
+1956-2025,1957,2025,69,62,4168,5.62,40.82,89.4,71.6,3.31,27.08,0.783,1.95,24.83,62,-0.434,-1.254,9.7,-3.889
+1966-2025,1967,2025,59,187,10820,6.0,41.28,88.9,73.8,-3.29,25.44,0.795,0.26,16.72,187,-1.171,-1.577,20.9,-6.463
+1976-2025,1977,2025,49,235,11276,6.11,43.56,88.7,75.0,-4.84,24.63,0.807,-0.29,13.55,235,-3.25,-3.043,40.4,-9.333
+1986-2025,1987,2025,39,303,11597,6.53,45.16,88.6,72.4,-5.12,25.02,0.832,-0.59,13.23,303,-2.75,-3.094,19.8,-8.4

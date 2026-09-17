@@ -1,0 +1,5 @@
+period,candidates,selected,failed_coverage,failed_gap,failed_starts_early,failed_ends_late,failed_density,failed_stability
+1956-2025,1109,62,982,1032,854,462,54,16
+1966-2025,1069,187,859,854,579,422,42,12
+1976-2025,1051,235,779,739,467,404,42,16
+1986-2025,971,303,665,601,268,324,14,5

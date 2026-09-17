@@ -1,0 +1,4 @@
+elev_band,n_stations,max_swe_obs_mean,max_swe_bias,max_swe_rmse,max_swe_r,mean_swe_obs_mean,mean_swe_bias,mean_swe_rmse,mean_swe_r,snow_duration_obs_mean,snow_duration_bias,snow_duration_rmse,snow_duration_r,dohy_max_obs_mean,dohy_max_bias,dohy_max_rmse,dohy_max_r
+0-400 m,29,23.84,7.19,20.12,0.789,2.46,1.96,4.02,0.88,58.73,26.12,54.28,0.494,85.59,1.92,28.75,0.624
+400-600 m,26,39.43,8.49,23.99,0.784,4.89,3.33,6.1,0.881,71.8,25.42,56.4,0.565,90.76,1.5,24.66,0.7
+600-800 m,7,115.39,-32.05,67.4,0.749,21.25,-4.46,15.56,0.847,110.63,17.29,56.69,0.668,97.3,3.74,23.96,0.677
