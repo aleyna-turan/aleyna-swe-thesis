@@ -97,7 +97,7 @@ FREQUENCY_HOMOGENISATION = "dominant"
 
 # SWE at or above this counts as "snow present" (mm water equivalent).
 # 0.0 would let trace/rounding noise define season length.
-SNOW_THRESHOLD_MM = 1.0
+SNOW_THRESHOLD_MM = 5.0
 
 # A hydrological year is usable for a station only if it has at least this
 # many observations (weekly sampling -> a full HY holds ~52, a full snow
