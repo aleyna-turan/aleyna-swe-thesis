@@ -76,9 +76,12 @@ MAX_CV_OBS = 0.60           # coeff. of variation of obs/season; catches station
                             # whose measurement intensity swings wildly
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TABLES = REPO_ROOT / "results" / "tables"
-FIGURES = REPO_ROOT / "results" / "figures"
-META_FILE = TABLES / "station_metadata.csv"
+# Results are grouped by the question they answer, not by period.
+# This script is stage 01: which stations measured regularly?
+INPUTS = REPO_ROOT / "results" / "tables" / "00_inputs"
+TABLES = REPO_ROOT / "results" / "tables" / "01_data_screening"
+FIGURES = REPO_ROOT / "results" / "figures" / "01_data_screening"
+META_FILE = INPUTS / "station_metadata.csv"
 
 
 def find_obs_file() -> Path:
@@ -86,11 +89,11 @@ def find_obs_file() -> Path:
     the copy committed to the repo is gzipped. Accept either."""
     for name in ("modelled_vs_observed_swe.csv",
                  "modelled_vs_observed_swe.csv.gz"):
-        p = TABLES / name
+        p = INPUTS / name
         if p.exists():
             return p
     raise FileNotFoundError(
-        f"No observation table found in {TABLES}.\n"
+        f"No observation table found in {INPUTS}.\n"
         f"Expected 'modelled_vs_observed_swe.csv' or '.csv.gz'.\n"
         f"Run scripts/03_extract_modelled_swe.py first, or pull the gzipped "
         f"copy from the repo."
@@ -221,6 +224,19 @@ def diagnose(counts: pd.DataFrame, start: int, end: int) -> pd.DataFrame:
     return d
 
 
+def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
+    # Wrap to the figure width and reserve bottom margin, so a long caption
+    # is never clipped at the right edge.
+    import textwrap
+    width = int(fig.get_figwidth() * 17)
+    lines = []
+    for para in text.split("\n"):
+        lines.extend(textwrap.wrap(para, width=width) or [""])
+    fig.subplots_adjust(bottom=base_bottom + 0.030 * len(lines))
+    fig.text(0.012, 0.015, "\n".join(lines), fontsize=8.3, color="#333333",
+             va="bottom")
+
+
 # --- Step 3: figure ---------------------------------------------------------
 
 def availability_figure(counts: pd.DataFrame, selected_ids: list, start: int,
@@ -245,12 +261,18 @@ def availability_figure(counts: pd.DataFrame, selected_ids: list, start: int,
     ax.set_xticks(np.arange(0, len(seasons), 5))
     ax.set_xticklabels(seasons[::5], rotation=90, fontsize=7)
     ax.set_yticks([])
-    ax.set_xlabel("Snow season (start year)")
+    ax.set_xlabel("Snow season, labelled by its start year (Nov of that year to Apr of the next)")
     ax.set_ylabel(f"Selected stations (n = {len(mat)})")
-    ax.set_title(f"Observations per season, selected stations, "
-                 f"{period_label(start, end)}")
-    fig.colorbar(im, ax=ax, label="observations in season")
-    fig.tight_layout()
+    ax.set_title(f"Measurement record of the selected stations, {period_label(start, end)}",
+                 fontsize=13)
+    fig.colorbar(im, ax=ax, label="Observations recorded in that season (weekly, so ~26 is full)")
+    fig.subplots_adjust(top=0.92)
+    _caption(fig,
+             "One row per station that PASSED screening, sorted by record length; one column per snow season. "
+             f"Bright = a full season of weekly measurements, dark = few, blank = none.\n"
+             f"A season counts as active with at least {MIN_OBS_PER_SEASON} observations. Stations shown here are "
+             f"active in at least {MIN_COVERAGE:.0%} of seasons, with no gap longer than {MAX_GAP_SEASONS} seasons. "
+             "Visible dark streaks are tolerated gaps, not rejected stations.")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)

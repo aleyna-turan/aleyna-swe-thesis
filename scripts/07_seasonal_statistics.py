@@ -76,6 +76,7 @@ figures/annual_maxswe_<period>.png
 figures/trend_vs_elevation_<period>.png
 """
 
+import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -127,9 +128,16 @@ METRICS = [
 ]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TABLES = REPO_ROOT / "results" / "tables"
-FIGURES = REPO_ROOT / "results" / "figures"
-META_FILE = TABLES / "station_metadata.csv"
+# Results are grouped by the question they answer, not by period.
+# This script writes stage 02 (model evaluation) and stage 03 (trends),
+# and reads the selected station lists produced by script 06 (stage 01).
+INPUTS = REPO_ROOT / "results" / "tables" / "00_inputs"
+SCREENING = REPO_ROOT / "results" / "tables" / "01_data_screening"
+TABLES = REPO_ROOT / "results" / "tables" / "02_model_evaluation"
+TRENDS = REPO_ROOT / "results" / "tables" / "03_trends"
+FIGURES = REPO_ROOT / "results" / "figures" / "02_model_evaluation"
+TREND_FIGURES = REPO_ROOT / "results" / "figures" / "03_trends"
+META_FILE = INPUTS / "station_metadata.csv"
 
 MAKE_FIGURES = True
 
@@ -145,11 +153,11 @@ def hydro_years(start: int, end: int) -> np.ndarray:
 
 def find_obs_file() -> Path:
     for name in ("modelled_vs_observed_swe.csv", "modelled_vs_observed_swe.csv.gz"):
-        p = TABLES / name
+        p = INPUTS / name
         if p.exists():
             return p
     raise FileNotFoundError(
-        f"No observation table in {TABLES}. Run scripts/03_extract_modelled_swe.py "
+        f"No observation table in {INPUTS}. Run scripts/03_extract_modelled_swe.py "
         f"or pull the gzipped copy from the repo."
     )
 
@@ -358,9 +366,174 @@ def elevation_bands(ev: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
 
 
 # --- Step 6: figures --------------------------------------------------------
+#
+# Every figure carries, inside the image: a title saying WHAT it shows, a
+# subtitle saying HOW the plotted quantity was computed, a legend, and a
+# footnote saying HOW TO READ it and what the limitations are. The figures
+# are meant to be understandable on their own, without the thesis text.
 
-def make_figures(ann: pd.DataFrame, tr: pd.DataFrame, meta: pd.DataFrame,
-                 label: str) -> None:
+OBS_COLOR = "#1f77b4"
+MOD_COLOR = "#e8702a"
+CAPTION_KW = dict(fontsize=8.3, color="#333333", va="bottom")
+
+
+def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
+    # Wrap to the figure width and reserve enough bottom margin for the lines,
+    # so a long caption is never clipped at the right edge.
+    width = int(fig.get_figwidth() * 17)
+    lines = []
+    for para in text.split("\n"):
+        lines.extend(textwrap.wrap(para, width=width) or [""])
+    fig.subplots_adjust(bottom=base_bottom + 0.030 * len(lines))
+    fig.text(0.012, 0.015, "\n".join(lines), **CAPTION_KW)
+
+
+def _theil_sen(x, y):
+    # Robust slope + Mann-Kendall p, used to annotate the elevation figures.
+    ok = x.notna() & y.notna()
+    if ok.sum() < 10:
+        return None
+    slope, intercept, _, _ = stats.theilslopes(y[ok], x[ok], 0.95)
+    tau, pval = stats.kendalltau(x[ok], y[ok])
+    return slope, intercept, tau, pval, int(ok.sum())
+
+
+def fig_annual_series(ann: pd.DataFrame, label: str, plt) -> None:
+    # Observed is drawn THICK underneath, model THIN and DASHED on top, so a
+    # year where the two agree exactly shows the dashed line inside the thick
+    # band instead of one line vanishing under the other.
+    ties = int((ann["snow_duration_obs_median"] == ann["snow_duration_mod_median"]).sum())
+    n_years = len(ann)
+    n_lo, n_hi = int(ann["n_stations"].min()), int(ann["n_stations"].max())
+
+    fig, axes = plt.subplots(2, 1, figsize=(11, 8.6), sharex=True)
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.90, hspace=0.30)
+
+    for ax, obs_col, mod_col, ylab, sub in (
+        (axes[0], "max_swe_obs_median", "max_swe_mod_median",
+         "Peak SWE (mm)",
+         "Peak SWE: the largest SWE value observed in each hydrological year at each station, then the median across stations"),
+        (axes[1], "snow_duration_obs_median", "snow_duration_mod_median",
+         "Snow season length (days)",
+         "Snow season length: days from the first to the last observation with SWE >= %g mm, then the median across stations" % SNOW_THRESHOLD_MM),
+    ):
+        ax.plot(ann["hydro_year"], ann[obs_col], color=OBS_COLOR, lw=4.0,
+                alpha=0.55, solid_capstyle="round", label="Observed (CHMI stations)")
+        ax.plot(ann["hydro_year"], ann[mod_col], color=MOD_COLOR, lw=1.6,
+                ls="--", marker="o", ms=3.2, label="mHM simulated")
+        ax.set_ylabel(ylab)
+        ax.set_title(sub, fontsize=9, loc="left", color="#444444", pad=6)
+        ax.grid(alpha=0.25, lw=0.5)
+        ax.legend(loc="upper right", framealpha=0.9)
+
+    axes[1].set_xlabel("Hydrological year (1 Nov of the previous year to 31 Oct)")
+
+    fig.suptitle("Observed and simulated snow, %s" % label, fontsize=13, y=0.97)
+
+    caption = (
+        "How to read: the observed series is drawn as a thick pale band and the model as a thin dashed line on top. "
+        "Where only the dashed line is visible the two series are IDENTICAL for that year - this is agreement, not missing data. "
+        "Both series are complete: every year has a value, from %d to %d stations.\n"
+        "Snow season length can only take values that are multiples of 7 days, because SWE is measured weekly, so exact ties are common "
+        "(%d of %d years here). Medians, not means, are shown so that a few very snowy mountain stations do not dominate. "
+        "Model values are sampled on the same dates as the observations, never from the full daily model output."
+    ) % (n_lo, n_hi, ties, n_years)
+    _caption(fig, caption, base_bottom=0.07)
+
+    fig.savefig(FIGURES / ("annual_series_%s.png" % label), dpi=150)
+    plt.close(fig)
+
+
+def fig_bias_vs_elevation(ev: pd.DataFrame, meta: pd.DataFrame, label: str, plt) -> None:
+    # The headline result: model bias becomes more negative with elevation.
+    d = ev.merge(meta[["station_id", "station_name", "elevation_m"]],
+                 on="station_id", how="left").dropna(subset=["max_swe_bias", "elevation_m"])
+
+    fig, ax = plt.subplots(figsize=(10, 6.4))
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.90)
+
+    ax.scatter(d["elevation_m"], d["max_swe_bias"], s=26, alpha=0.65,
+               color=OBS_COLOR, edgecolor="none", label="One station (n = %d)" % len(d))
+    ax.axhline(0, color="#444444", lw=1.0)
+
+    fit = _theil_sen(d["elevation_m"], d["max_swe_bias"])
+    if fit:
+        slope, intercept, tau, pval, n = fit
+        xs = np.array([d["elevation_m"].min(), d["elevation_m"].max()])
+        ax.plot(xs, intercept + slope * xs, color="#b3331c", lw=2.0,
+                label="Theil-Sen fit: %+.2f mm per 100 m" % (slope * 100))
+        ax.annotate("Kendall tau = %.3f\np = %.1e\nn = %d stations" % (tau, pval, n),
+                    xy=(0.985, 0.96), xycoords="axes fraction", ha="right", va="top",
+                    fontsize=9, bbox=dict(boxstyle="round,pad=0.45", fc="white",
+                                          ec="#bbbbbb", alpha=0.92))
+
+    # Name the extreme stations so they are not anonymous points.
+    lo, hi = d["max_swe_bias"].min(), d["max_swe_bias"].max()
+    pad = 0.18 * (hi - lo)
+    ax.set_ylim(lo - pad, hi + pad)
+    for _, r in d.nsmallest(2, "max_swe_bias").iterrows():
+        ax.annotate(str(r["station_name"]), xy=(r["elevation_m"], r["max_swe_bias"]),
+                    xytext=(-14, -16), textcoords="offset points", fontsize=8.5,
+                    color="#b3331c", ha="right",
+                    arrowprops=dict(arrowstyle="-", color="#b3331c", lw=0.7))
+
+    ax.set_xlabel("Station elevation (m a.s.l.)")
+    ax.set_ylabel("mHM peak SWE bias (mm)")
+    ax.set_title("Model bias in peak SWE against station elevation, %s" % label,
+                 fontsize=13)
+    ax.grid(alpha=0.25, lw=0.5)
+    ax.legend(loc="lower left", framealpha=0.9)
+
+    caption = (
+        "Bias = mean over all hydrological years of (modelled peak SWE - observed peak SWE) at that station. "
+        "Negative means the model holds less snow than was measured.\n"
+        "The line is a Theil-Sen fit (median of the slopes of all station pairs) and the test is Mann-Kendall, "
+        "both chosen because a few isolated summit stations have extreme bias and would dominate an ordinary least-squares fit. "
+        "Those stations are labelled; the relationship holds with them removed."
+    )
+    _caption(fig, caption)
+
+    fig.savefig(FIGURES / ("bias_vs_elevation_%s.png" % label), dpi=150)
+    plt.close(fig)
+
+
+def fig_trend_vs_elevation(tr: pd.DataFrame, meta: pd.DataFrame, label: str, plt) -> None:
+    d = tr.merge(meta[["station_id", "elevation_m"]], on="station_id", how="left")
+    d = d.dropna(subset=["max_swe_obs_slope", "elevation_m"])
+    sig = d["max_swe_obs_p"] < ALPHA
+
+    fig, ax = plt.subplots(figsize=(10, 6.4))
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.90)
+
+    ax.scatter(d.loc[~sig, "elevation_m"], d.loc[~sig, "max_swe_obs_slope"] * 10,
+               s=22, alpha=0.45, color="#8c8c8c", edgecolor="none",
+               label="Not significant, p >= %g (n = %d)" % (ALPHA, int((~sig).sum())))
+    ax.scatter(d.loc[sig, "elevation_m"], d.loc[sig, "max_swe_obs_slope"] * 10,
+               s=30, alpha=0.85, color=OBS_COLOR, edgecolor="none",
+               label="Significant, p < %g (n = %d)" % (ALPHA, int(sig.sum())))
+    ax.axhline(0, color="#444444", lw=1.0)
+
+    ax.set_xlabel("Station elevation (m a.s.l.)")
+    ax.set_ylabel("Observed peak SWE trend (mm per decade)")
+    ax.set_title("Observed peak SWE trend against station elevation, %s" % label,
+                 fontsize=13)
+    ax.grid(alpha=0.25, lw=0.5)
+    ax.legend(loc="lower left", framealpha=0.9)
+
+    caption = (
+        "One point per station. The trend is the Theil-Sen slope of that station's annual peak SWE against hydrological year, "
+        "converted to mm per decade; significance is the Mann-Kendall test at alpha = %g.\n"
+        "Points below the zero line are stations where peak SWE is declining. Only stations with at least %g of the period's "
+        "hydrological years present are included, so a short or gappy record cannot produce a spurious trend."
+    ) % (ALPHA, MIN_YEARS_FRACTION_FOR_TREND)
+    _caption(fig, caption)
+
+    fig.savefig(TREND_FIGURES / ("trend_vs_elevation_%s.png" % label), dpi=150)
+    plt.close(fig)
+
+
+def make_figures(ann: pd.DataFrame, tr: pd.DataFrame, ev: pd.DataFrame,
+                 meta: pd.DataFrame, label: str) -> None:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -370,44 +543,20 @@ def make_figures(ann: pd.DataFrame, tr: pd.DataFrame, meta: pd.DataFrame,
         return
 
     FIGURES.mkdir(parents=True, exist_ok=True)
+    TREND_FIGURES.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-    axes[0].plot(ann["hydro_year"], ann["max_swe_obs_median"], label="observed", lw=1.6)
-    axes[0].plot(ann["hydro_year"], ann["max_swe_mod_median"], label="mHM", lw=1.6)
-    axes[0].set_ylabel("Network median peak SWE (mm)")
-    axes[0].legend()
-    axes[0].set_title(f"Peak SWE and snow duration, {label} (hydrological years)")
-    axes[1].plot(ann["hydro_year"], ann["snow_duration_obs_median"], label="observed", lw=1.6)
-    axes[1].plot(ann["hydro_year"], ann["snow_duration_mod_median"], label="mHM", lw=1.6)
-    axes[1].set_ylabel("Network median snow duration (days)")
-    axes[1].set_xlabel("Hydrological year (ends 31 Oct)")
-    axes[1].legend()
-    fig.tight_layout()
-    fig.savefig(FIGURES / f"annual_maxswe_{label}.png", dpi=150)
-    plt.close(fig)
-
-    d = tr.merge(meta[["station_id", "elevation_m"]], on="station_id", how="left")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    sig = d["max_swe_obs_p"] < ALPHA
-    ax.scatter(d.loc[~sig, "elevation_m"], d.loc[~sig, "max_swe_obs_slope"] * 10,
-               s=16, alpha=0.5, label=f"p >= {ALPHA}")
-    ax.scatter(d.loc[sig, "elevation_m"], d.loc[sig, "max_swe_obs_slope"] * 10,
-               s=22, alpha=0.9, label=f"p < {ALPHA}")
-    ax.axhline(0, lw=0.8, color="k")
-    ax.set_xlabel("Station elevation (m)")
-    ax.set_ylabel("Observed peak SWE trend (mm per decade)")
-    ax.set_title(f"Peak SWE trend vs elevation, {label}")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(FIGURES / f"trend_vs_elevation_{label}.png", dpi=150)
-    plt.close(fig)
-    print(f"  figures -> annual_maxswe_{label}.png, trend_vs_elevation_{label}.png")
+    fig_annual_series(ann, label, plt)
+    fig_bias_vs_elevation(ev, meta, label, plt)
+    fig_trend_vs_elevation(tr, meta, label, plt)
+    print("  figures -> annual_series_%s.png, bias_vs_elevation_%s.png, "
+          "trend_vs_elevation_%s.png" % (label, label, label))
 
 
 # --- Main -------------------------------------------------------------------
 
 def main():
-    TABLES.mkdir(parents=True, exist_ok=True)
+    for d in (TABLES, TRENDS, FIGURES, TREND_FIGURES):
+        d.mkdir(parents=True, exist_ok=True)
     obs_file = find_obs_file()
     print(f"Reading {obs_file.name} ...")
     df = load_observations(obs_file)
@@ -424,7 +573,7 @@ def main():
         hys = hydro_years(start, end)
         print(f"\n=== {label}  (HY {hys[0]}-{hys[-1]}, {len(hys)} hydrological years) ===")
 
-        sel_path = TABLES / f"qc_selected_{label}.csv"
+        sel_path = SCREENING / f"qc_selected_{label}.csv"
         if not sel_path.exists():
             print(f"  [skip] {sel_path.name} not found - run script 06 first")
             continue
@@ -446,8 +595,8 @@ def main():
         ev.merge(meta, on="station_id", how="left") \
           .to_csv(TABLES / f"model_eval_{label}.csv", index=False)
         tr.merge(meta, on="station_id", how="left") \
-          .to_csv(TABLES / f"trends_{label}.csv", index=False)
-        ts.to_csv(TABLES / f"trend_summary_{label}.csv", index=False)
+          .to_csv(TRENDS / f"trends_{label}.csv", index=False)
+        ts.to_csv(TRENDS / f"trend_summary_{label}.csv", index=False)
         ann.to_csv(TABLES / f"annual_series_{label}.csv", index=False)
         eb.to_csv(TABLES / f"elevation_bands_{label}.csv", index=False)
 
@@ -485,14 +634,14 @@ def main():
               f"r = {ev_num['max_swe_r'].mean():.2f}")
 
         if MAKE_FIGURES:
-            make_figures(ann, tr, meta, label)
+            make_figures(ann, tr, ev, meta, label)
 
     comp = pd.DataFrame(comparison)
     comp.to_csv(TABLES / "period_comparison.csv", index=False)
     print("\n=== Period comparison (this is the table to choose from) ===")
     with pd.option_context("display.width", 200, "display.max_columns", 50):
         print(comp.to_string(index=False))
-    print(f"\nAll tables written to {TABLES}")
+    print(f"\nTables written to {TABLES.parent}, figures to {FIGURES.parent}")
     print(f"Settings: snow_threshold={SNOW_THRESHOLD_MM} mm, "
           f"min_obs_per_hy={MIN_OBS_PER_HY}, "
           f"min_years_fraction_for_trend={MIN_YEARS_FRACTION_FOR_TREND}, "

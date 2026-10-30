@@ -60,10 +60,18 @@ MIN_OBS_PER_HY = 10
 
 ELEVATION_BANDS = [(0, 400), (400, 600), (600, 800), (800, 1000), (1000, 9999)]
 
+# The month-by-month disagreement figure is built at this threshold.
+SNOW_THRESHOLD_FOR_MONTHS = 1.0
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TABLES = REPO_ROOT / "results" / "tables"
-FIGURES = REPO_ROOT / "results" / "figures"
-META_FILE = TABLES / "station_metadata.csv"
+# Results are grouped by the question they answer, not by period.
+# This script is stage 04: are the duration results an artefact of the
+# threshold? It reads the selected station lists from stage 01.
+INPUTS = REPO_ROOT / "results" / "tables" / "00_inputs"
+SCREENING = REPO_ROOT / "results" / "tables" / "01_data_screening"
+TABLES = REPO_ROOT / "results" / "tables" / "04_threshold_tests"
+FIGURES = REPO_ROOT / "results" / "figures" / "04_threshold_tests"
+META_FILE = INPUTS / "station_metadata.csv"
 
 MAKE_FIGURES = True
 
@@ -78,10 +86,10 @@ def hydro_years(start: int, end: int) -> tuple:
 
 def find_obs_file() -> Path:
     for name in ("modelled_vs_observed_swe.csv", "modelled_vs_observed_swe.csv.gz"):
-        p = TABLES / name
+        p = INPUTS / name
         if p.exists():
             return p
-    raise FileNotFoundError(f"No observation table in {TABLES}. Run script 03.")
+    raise FileNotFoundError(f"No observation table in {INPUTS}. Run script 03.")
 
 
 def load_observations(path: Path) -> pd.DataFrame:
@@ -141,7 +149,7 @@ def threshold_sensitivity(df: pd.DataFrame, meta: pd.DataFrame) -> tuple:
 
     for start, end in PERIODS:
         label = period_label(start, end)
-        sel_path = TABLES / f"qc_selected_{label}.csv"
+        sel_path = SCREENING / f"qc_selected_{label}.csv"
         if not sel_path.exists():
             print(f"  [skip] {sel_path.name} missing - run script 06")
             continue
@@ -232,6 +240,19 @@ def false_snow_by_month(d: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values("hy_order").drop(columns="hy_order")
 
 
+def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
+    # Wrap to the figure width and reserve bottom margin, so a long caption
+    # is never clipped at the right edge.
+    import textwrap
+    width = int(fig.get_figwidth() * 17)
+    lines = []
+    for para in text.split("\n"):
+        lines.extend(textwrap.wrap(para, width=width) or [""])
+    fig.subplots_adjust(bottom=base_bottom + 0.030 * len(lines))
+    fig.text(0.012, 0.015, "\n".join(lines), fontsize=8.3, color="#333333",
+             va="bottom")
+
+
 # --- Figures ----------------------------------------------------------------
 
 def make_figures(sens: pd.DataFrame, fsm: pd.DataFrame, label: str) -> None:
@@ -251,11 +272,18 @@ def make_figures(sens: pd.DataFrame, fsm: pd.DataFrame, label: str) -> None:
     ax.set_xscale("log")
     ax.set_xticks(THRESHOLDS_MM)
     ax.set_xticklabels([str(t) for t in THRESHOLDS_MM])
-    ax.set_xlabel("Snow threshold (mm SWE)")
+    ax.set_xlabel("Snow threshold used to define snow cover (mm SWE)")
     ax.set_ylabel("mHM snow duration bias (days)")
-    ax.set_title("Does the snow-duration bias survive a higher threshold?")
-    ax.legend()
-    fig.tight_layout()
+    ax.set_title("Does the snow-duration bias survive a higher threshold?", fontsize=13)
+    ax.grid(alpha=0.25, lw=0.5)
+    ax.legend(title="Study period", framealpha=0.9)
+    fig.subplots_adjust(top=0.90)
+    _caption(fig,
+             "Bias = mean over all station-years of (modelled snow season length - observed snow season length), "
+             "recomputed from scratch at each threshold.\n"
+             "A bias that shrinks towards zero as the threshold rises is an ARTEFACT of where the threshold was drawn, "
+             "not a model error. A bias that stays flat would be a real error.\n"
+             "Read the x-axis as: how much SWE must be present before that date counts as a day with snow cover.")
     fig.savefig(FIGURES / f"duration_threshold_{label}.png", dpi=150)
     plt.close(fig)
 
@@ -266,11 +294,19 @@ def make_figures(sens: pd.DataFrame, fsm: pd.DataFrame, label: str) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(["Nov", "Dec", "Jan", "Feb", "Mar", "Apr",
                         "May", "Jun", "Jul", "Aug", "Sep", "Oct"])
-    ax.set_ylabel("% of observation dates in month")
-    ax.set_xlabel("Month (hydrological year order)")
-    ax.set_title(f"Where in the season the model and observations disagree, {label}")
-    ax.legend()
-    fig.tight_layout()
+    ax.set_ylabel("Share of that month's observation dates (%)")
+    ax.set_xlabel("Month, in hydrological year order (Nov to Oct)")
+    ax.set_title(f"Where in the season the model and the observations disagree, {label}",
+                 fontsize=13)
+    ax.grid(alpha=0.25, lw=0.5, axis="y")
+    ax.legend(framealpha=0.9)
+    fig.subplots_adjust(top=0.90)
+    _caption(fig,
+             f"Every observation date is classified at a {SNOW_THRESHOLD_FOR_MONTHS:g} mm threshold. "
+             "False snow = the model reports snow where the station measured none. "
+             "Missed snow = the station measured snow where the model reports none.\n"
+             "False snow concentrated in early winter, with small modelled values, is the signature of the model "
+             "laying down a thin snow cover that the CHMI protocol does not register.")
     fig.savefig(FIGURES / f"false_snow_seasonality_{label}.png", dpi=150)
     plt.close(fig)
     print(f"  figures -> duration_threshold_{label}.png, "
@@ -298,7 +334,7 @@ def main():
 
     label = period_label(*MAIN_PERIOD)
     print(f"\n--- PART B: mechanism, {label} ---")
-    sel = pd.read_csv(TABLES / f"qc_selected_{label}.csv")["station_id"].tolist()
+    sel = pd.read_csv(SCREENING / f"qc_selected_{label}.csv")["station_id"].tolist()
     hy0, hy1 = hydro_years(*MAIN_PERIOD)
     sub = df[df["station_id"].isin(sel) & df["hydro_year"].between(hy0, hy1)]
 
@@ -306,7 +342,7 @@ def main():
     for thr in THRESHOLDS_MM:
         c, d = contingency(sub, thr)
         cont_all.append(c)
-        if thr == 1.0:
+        if thr == SNOW_THRESHOLD_FOR_MONTHS:
             fsm = false_snow_by_month(d)
     cont = pd.concat(cont_all, ignore_index=True)
     cont.to_csv(TABLES / f"snow_contingency_{label}.csv", index=False)
