@@ -1,0 +1,99 @@
+BLANK MODELLED VALUES — DIAGNOSIS
+Reading modelled_vs_observed_swe.csv ...
+1,981,138 rows total, 104,299 with a blank modelled value (5.26%)
+
+==============================================================================
+1. ARE THEY BEFORE THE MODEL PERIOD?
+==============================================================================
+
+The mHM file starts 1950-01-01. Observations earlier than
+that cannot have a modelled counterpart. If every blank row is here,
+the explanation is benign.
+
+  blank AND before 1950-01-01 :  104,299
+  blank AND after  1950-01-01 :        0   <-- the ones that matter
+
+  VERDICT: every blank is an observation predating the model.
+  Nothing downstream is affected.
+
+==============================================================================
+2. WHEN DO THE BLANKS OCCUR?
+==============================================================================
+
+Blank rows per decade, so the pattern is visible rather than assumed.
+
+    decade      blank   all rows   % blank
+      1890        782        782    100.0%
+      1900      3,369      3,369    100.0%
+      1910      3,566      3,566    100.0%
+      1920     13,264     13,264    100.0%
+      1930     28,610     28,610    100.0%
+      1940     54,708     54,708    100.0%
+      1950          0     98,101      0.0%
+      1960          0    178,658      0.0%
+      1970          0    222,250      0.0%
+      1980          0    293,005      0.0%
+      1990          0    257,434      0.0%
+      2000          0    311,173      0.0%
+      2010          0    332,808      0.0%
+      2020          0    183,410      0.0%
+
+==============================================================================
+3. BLANKS INSIDE THE STUDY PERIOD (1976-2025, HY 1977-2025)
+==============================================================================
+
+This is the question that decides whether anything must change.
+
+  rows inside the period        : 1,447,389
+  of which blank modelled       :         0  (0.000%)
+
+  restricted to the 235 SELECTED stations:
+    rows                        :   517,812
+    of which blank modelled     :         0  (0.000%)
+
+    VERDICT: no selected station loses a single row inside the
+    study period. Screening and metrics see the same data, and
+    no result is affected.
+
+==============================================================================
+4. ARE ANY STATIONS BLANK ON EVERY DATE?
+==============================================================================
+
+A station whose grid cell is masked in the model would return no
+value on any date. Such a station should never have entered the
+analysis at all.
+
+  stations with NO modelled value at all : 16
+
+         station_id  size  sum        station_name  latitude  longitude  elevation_m
+0-203-0-11503013001    51   51  Přísečnice  Špičák 50.466000  13.133000        802.0
+0-203-0-20101117002   187  187   Velké Albrechtice 49.750000  18.050000        253.0
+0-203-0-20204003101   352  352     Ostrava  Hrušov 49.869400  18.288900        205.0
+0-203-0-20301038001   777  777     Morávka  Slavíč 49.566700  18.583300        620.0
+0-203-0-20303010001   568  568     Morávka  Skalka 49.536100  18.583300        650.0
+0-203-0-20404019001   127  127  Zálesí u Javorníka 50.350000  16.933300        632.0
+0-203-0-20404053001   443  443   Nová Červená Voda 50.320680  17.190700        310.0
+0-203-0-41001001003   733  733    Králický Sněžník 50.205000  16.849300       1380.0
+0-203-0-41001021001   347  347         Staré Město 50.166700  16.950000        530.0
+0-203-0-41002070001     7    7    Moravská Třebová 49.761100  16.666700        349.0
+0-203-0-41002098001   243  243            Březinky 49.661100  16.788900        400.0
+0-203-0-41003020002    67   67             Příkazy 49.643788  17.143883        225.0
+0-203-0-41401016001    12   12            Krahulčí 49.185200  15.416800        544.0
+0-203-0-41402011001    13   13 Želetava  Bítovánky 49.143800  15.690900        575.0
+0-203-0-41502077001    19   19              Žďárná 49.467900  16.753800        641.0
+0-203-0-41502109602     3    3         Brno  Líšeň 49.217200  16.680800        218.0
+
+  of these, 0 passed screening for 1976-2025 (none, so no effect)
+
+==============================================================================
+5. WHAT THE ANALYSIS SCRIPTS DO WITH THESE ROWS
+==============================================================================
+
+Scripts 07 and 08 both call dropna(subset=['modelled_swe_mm']) when
+they load the table, so blank rows are removed before any metric is
+computed. Script 06 does not, because it reads only station_id and
+date — it is measuring whether the STATION reported, which is a
+question about the observations alone.
+
+That difference is only a problem if blanks fall inside a study
+period at a selected station. Section 3 above answers that.

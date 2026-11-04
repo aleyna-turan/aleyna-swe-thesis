@@ -113,6 +113,27 @@ ALPHA = 0.05  # significance level for Mann-Kendall
 
 ELEVATION_BANDS = [(0, 400), (400, 600), (600, 800), (800, 1000), (1000, 9999)]
 
+# --- Percentile bands across stations -------------------------------------
+# These describe the SPREAD of station values, not the precision of the
+# median. Supervisor's options were min-max, 2.5-97.5, or 5-95. The outer band
+# is set to 5-95 because min-max is dominated by a single mountain station
+# every year. Set BAND_INNER to None to draw only the outer band.
+BAND_OUTER = (5, 95)
+BAND_INNER = (25, 75)
+
+# All of these are written to annual_percentiles_<period>.csv, so the figure
+# can be redrawn with a different choice without recomputing anything.
+PERCENTILES = [2.5, 5, 25, 50, 75, 95, 97.5]
+
+# Confidence level for the Theil-Sen slope interval on the elevation figure.
+# This one IS a confidence interval: it is about the fit, not the spread.
+SLOPE_CI_ALPHA = 0.05
+
+
+def _ptag(p) -> str:
+    """Column name for a percentile: 2.5 -> p2_5, 50 -> p50."""
+    return "p" + f"{p:g}".replace(".", "_")
+
 # Metrics carried through model evaluation and trend analysis
 METRICS = [
     "mean_swe",        # mean over the whole hydrological year, zeros included
@@ -347,6 +368,30 @@ def annual_series(sm: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index()
 
 
+def annual_percentiles(sm: pd.DataFrame) -> pd.DataFrame:
+    """Spread of station values within each hydrological year.
+
+    Long format - one row per hydrological year, metric and source - because
+    a wide table would need 200+ columns and be unreadable. Filter on metric
+    and source to pull one series out.
+    """
+    rows = []
+    for hy, g in sm.groupby("hydro_year"):
+        for m in METRICS:
+            for src in ("obs", "mod"):
+                v = g[f"{m}_{src}"].dropna()
+                if v.empty:
+                    continue
+                row = {"hydro_year": int(hy), "metric": m, "source": src,
+                       "n_stations": int(len(v)),
+                       "mean": float(v.mean()),
+                       "min": float(v.min()), "max": float(v.max())}
+                for p in PERCENTILES:
+                    row[_ptag(p)] = float(v.quantile(p / 100.0))
+                rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def elevation_bands(ev: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     d = ev.merge(meta[["station_id", "elevation_m"]], on="station_id", how="left")
     rows = []
@@ -380,7 +425,7 @@ CAPTION_KW = dict(fontsize=8.3, color="#333333", va="bottom")
 def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
     # Wrap to the figure width and reserve enough bottom margin for the lines,
     # so a long caption is never clipped at the right edge.
-    width = int(fig.get_figwidth() * 17)
+    width = int(fig.get_figwidth() * 15)
     lines = []
     for para in text.split("\n"):
         lines.extend(textwrap.wrap(para, width=width) or [""])
@@ -389,63 +434,183 @@ def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
 
 
 def _theil_sen(x, y):
-    # Robust slope + Mann-Kendall p, used to annotate the elevation figures.
+    """Robust slope with a confidence interval, plus the Mann-Kendall test.
+
+    Theil-Sen takes the MEDIAN of the slopes of all pairs of points, so a few
+    extreme stations cannot drag the fit. scipy also returns the lower and
+    upper slope at the requested confidence level; those two slopes, pivoted
+    about the median point, give the shaded wedge drawn on the figure.
+
+    Kendall's tau tests only whether the ranking relationship exists, making
+    no assumption about the shape of the data.
+    """
     ok = x.notna() & y.notna()
     if ok.sum() < 10:
         return None
-    slope, intercept, _, _ = stats.theilslopes(y[ok], x[ok], 0.95)
+    slope, intercept, lo_slope, up_slope = stats.theilslopes(
+        y[ok], x[ok], 1 - SLOPE_CI_ALPHA)
     tau, pval = stats.kendalltau(x[ok], y[ok])
-    return slope, intercept, tau, pval, int(ok.sum())
+    return dict(slope=slope, intercept=intercept, lo=lo_slope, up=up_slope,
+                tau=tau, p=pval, n=int(ok.sum()),
+                xmed=float(x[ok].median()), ymed=float(y[ok].median()))
 
 
-def fig_annual_series(ann: pd.DataFrame, label: str, plt) -> None:
-    # Observed is drawn THICK underneath, model THIN and DASHED on top, so a
-    # year where the two agree exactly shows the dashed line inside the thick
-    # band instead of one line vanishing under the other.
-    ties = int((ann["snow_duration_obs_median"] == ann["snow_duration_mod_median"]).sum())
-    n_years = len(ann)
-    n_lo, n_hi = int(ann["n_stations"].min()), int(ann["n_stations"].max())
+def _series(pct: pd.DataFrame, metric: str, source: str):
+    """Pull one metric/source out of the long percentile table, year-ordered."""
+    d = pct[(pct["metric"] == metric) & (pct["source"] == source)]
+    return d.sort_values("hydro_year")
 
-    fig, axes = plt.subplots(2, 1, figsize=(11, 8.6), sharex=True)
+
+def fig_annual_series(pct: pd.DataFrame, label: str, plt) -> None:
+    """Network median per hydrological year, medians only.
+
+    Why no spread band here: the spread between stations is far larger than
+    the variation of the median between years, so a band drawn on these axes
+    would swamp the lines it is meant to annotate. Spread has its own figure,
+    annual_spread_<period>.png.
+
+    Observed is drawn THICK and pale underneath, the model THIN and dashed on
+    top, so a year where the two agree exactly shows the dashed line inside
+    the band rather than one series vanishing under the other.
+    """
+    specs = [
+        ("max_swe", "Peak SWE (mm)",
+         "Peak SWE: the largest SWE value in each hydrological year at each "
+         "station, then the median across stations"),
+        ("snow_duration", "Snow season length (days)",
+         "Snow season length: days from the first to the last observation with "
+         "SWE >= %g mm, then the median across stations" % SNOW_THRESHOLD_MM),
+    ]
+
+    fig, axes = plt.subplots(len(specs), 1, figsize=(11, 8.6), sharex=True)
     fig.subplots_adjust(left=0.08, right=0.97, top=0.90, hspace=0.30)
 
-    for ax, obs_col, mod_col, ylab, sub in (
-        (axes[0], "max_swe_obs_median", "max_swe_mod_median",
-         "Peak SWE (mm)",
-         "Peak SWE: the largest SWE value observed in each hydrological year at each station, then the median across stations"),
-        (axes[1], "snow_duration_obs_median", "snow_duration_mod_median",
-         "Snow season length (days)",
-         "Snow season length: days from the first to the last observation with SWE >= %g mm, then the median across stations" % SNOW_THRESHOLD_MM),
-    ):
-        ax.plot(ann["hydro_year"], ann[obs_col], color=OBS_COLOR, lw=4.0,
-                alpha=0.55, solid_capstyle="round", label="Observed (CHMI stations)")
-        ax.plot(ann["hydro_year"], ann[mod_col], color=MOD_COLOR, lw=1.6,
-                ls="--", marker="o", ms=3.2, label="mHM simulated")
+    ties = n_years = n_lo = n_hi = 0
+    for ax, (metric, ylab, sub) in zip(axes, specs):
+        o, m = _series(pct, metric, "obs"), _series(pct, metric, "mod")
+        yrs = o["hydro_year"].to_numpy()
+        ax.plot(yrs, o["p50"], color=OBS_COLOR, lw=4.0, alpha=0.55,
+                solid_capstyle="round", label="Observed (CHMI stations)")
+        ax.plot(yrs, m["p50"], color=MOD_COLOR, lw=1.6, ls="--", marker="o",
+                ms=3.2, label="mHM simulated")
         ax.set_ylabel(ylab)
         ax.set_title(sub, fontsize=9, loc="left", color="#444444", pad=6)
         ax.grid(alpha=0.25, lw=0.5)
         ax.legend(loc="upper right", framealpha=0.9)
+        if metric == "snow_duration":
+            ties = int((o["p50"].to_numpy() == m["p50"].to_numpy()).sum())
+            n_years = len(yrs)
+            n_lo = int(o["n_stations"].min())
+            n_hi = int(o["n_stations"].max())
 
-    axes[1].set_xlabel("Hydrological year (1 Nov of the previous year to 31 Oct)")
-
-    fig.suptitle("Observed and simulated snow, %s" % label, fontsize=13, y=0.97)
+    axes[-1].set_xlabel("Hydrological year (1 Nov of the previous year to 31 Oct)")
+    fig.suptitle("Observed and simulated snow, %s" % label, fontsize=13, y=0.965)
 
     caption = (
-        "How to read: the observed series is drawn as a thick pale band and the model as a thin dashed line on top. "
-        "Where only the dashed line is visible the two series are IDENTICAL for that year - this is agreement, not missing data. "
+        "How to read: the observed series is a thick pale band, the model a thin dashed line on top. "
+        "Where only the dashed line shows, the two are IDENTICAL for that year - agreement, not missing data. "
         "Both series are complete: every year has a value, from %d to %d stations.\n"
-        "Snow season length can only take values that are multiples of 7 days, because SWE is measured weekly, so exact ties are common "
-        "(%d of %d years here). Medians, not means, are shown so that a few very snowy mountain stations do not dominate. "
-        "Model values are sampled on the same dates as the observations, never from the full daily model output."
-    ) % (n_lo, n_hi, ties, n_years)
+        "Snow season length can only take values that are multiples of 7 days, because SWE is measured weekly, "
+        "so exact ties are common (%d of %d years here). Medians, not means, so that a few very snowy mountain "
+        "stations do not dominate. Model values are sampled on the same dates as the observations.\n"
+        "Station-to-station spread is shown separately in annual_spread_%s.png."
+    ) % (n_lo, n_hi, ties, n_years, label)
     _caption(fig, caption, base_bottom=0.07)
 
     fig.savefig(FIGURES / ("annual_series_%s.png" % label), dpi=150)
     plt.close(fig)
 
 
+def fig_annual_spread(pct: pd.DataFrame, label: str, plt) -> None:
+    """How much the stations differ, observations against model.
+
+    PERCENTILE RANGE, NOT CONFIDENCE INTERVAL. A confidence interval says how
+    precisely the median is known and narrows as stations are added. A
+    percentile range says how far apart the stations are and does not narrow.
+    The second is what is wanted: whether mHM reproduces the real variety of
+    snow conditions across Czechia, not just the typical station.
+
+    Observations and model are drawn in separate panels with a shared y-axis
+    per row, because four overlapping translucent bands on one panel are
+    impossible to read.
+    """
+    lo_o, hi_o = _ptag(BAND_OUTER[0]), _ptag(BAND_OUTER[1])
+    lo_i, hi_i = _ptag(BAND_INNER[0]), _ptag(BAND_INNER[1])
+
+    specs = [("max_swe", "Peak SWE (mm)"),
+             ("snow_duration", "Snow season length (days)")]
+    sources = [("obs", "Observed (CHMI stations)", OBS_COLOR),
+               ("mod", "mHM simulated", MOD_COLOR)]
+
+    fig, axes = plt.subplots(len(specs), 2, figsize=(12.5, 8.8), sharex=True)
+    fig.subplots_adjust(left=0.075, right=0.98, top=0.90, hspace=0.30, wspace=0.14)
+
+    widths = {}
+    for row, (metric, ylab) in enumerate(specs):
+        series = {src: _series(pct, metric, src) for src, _, _ in sources}
+        ymax = max(float(series[s][hi_o].max()) for s in series) * 1.06
+
+        for col, (src, src_label, color) in enumerate(sources):
+            ax = axes[row, col]
+            d = series[src]
+            yrs = d["hydro_year"].to_numpy()
+
+            ax.fill_between(yrs, d[lo_o], d[hi_o], color=color, alpha=0.20,
+                            lw=0, label="%g-%g percentile of stations" % BAND_OUTER)
+            ax.fill_between(yrs, d[lo_i], d[hi_i], color=color, alpha=0.42,
+                            lw=0, label="%g-%g, the middle half" % BAND_INNER)
+            ax.plot(yrs, d["p50"], color=color, lw=2.0, label="Median station")
+
+            w = float((d[hi_o].to_numpy() - d[lo_o].to_numpy()).mean())
+            widths[(metric, src)] = w
+            ax.annotate("mean %g-%g width: %.0f"
+                        % (BAND_OUTER[0], BAND_OUTER[1], w),
+                        xy=(0.98, 0.95), xycoords="axes fraction",
+                        ha="right", va="top", fontsize=8.5,
+                        bbox=dict(boxstyle="round,pad=0.35", fc="white",
+                                  ec="#cccccc", alpha=0.9))
+
+            ax.set_ylim(0, ymax)
+            ax.grid(alpha=0.25, lw=0.5)
+            ax.set_title(src_label, fontsize=10, pad=6)
+            if col == 0:
+                ax.set_ylabel(ylab)
+            else:
+                ax.tick_params(labelleft=False)
+            if row == 0:
+                ax.legend(loc="upper left", fontsize=7.8, framealpha=0.9)
+
+    for col in range(2):
+        axes[-1, col].set_xlabel("Hydrological year (ends 31 Oct)")
+
+    fig.suptitle("Spread of station values, observations against model, %s" % label,
+                 fontsize=13, y=0.965)
+
+    ratios = "; ".join(
+        "%s observed %.0f, mHM %.0f (%.0f%%)"
+        % (m.replace("_", " "), widths[(m, "obs")], widths[(m, "mod")],
+           100 * widths[(m, "mod")] / widths[(m, "obs")] if widths[(m, "obs")] else 0)
+        for m, _ in specs)
+
+    caption = (
+        "Each panel shows, for every hydrological year, the median station and the range the stations span. "
+        "These are PERCENTILE RANGES, not confidence intervals: they describe how far apart the stations are, "
+        "and do not narrow as stations are added.\n"
+        "Mean outer-band width - %s. A model band narrower than the observed band means mHM compresses the "
+        "difference between snowy and bare stations, under-representing the variety of conditions even where "
+        "its median tracks well.\n"
+        "The bands are wide because the network genuinely spans lowland stations with almost no snow and "
+        "mountain stations with several hundred mm. That between-station spread is much larger than the "
+        "year-to-year movement of the median, which is why the two are drawn as separate figures."
+    ) % ratios
+    _caption(fig, caption, base_bottom=0.06)
+
+    fig.savefig(FIGURES / ("annual_spread_%s.png" % label), dpi=150)
+    plt.close(fig)
+
+
 def fig_bias_vs_elevation(ev: pd.DataFrame, meta: pd.DataFrame, label: str, plt) -> None:
-    # The headline result: model bias becomes more negative with elevation.
+    """Per-station model bias against elevation: the headline result."""
     d = ev.merge(meta[["station_id", "station_name", "elevation_m"]],
                  on="station_id", how="left").dropna(subset=["max_swe_bias", "elevation_m"])
 
@@ -458,16 +623,25 @@ def fig_bias_vs_elevation(ev: pd.DataFrame, meta: pd.DataFrame, label: str, plt)
 
     fit = _theil_sen(d["elevation_m"], d["max_swe_bias"])
     if fit:
-        slope, intercept, tau, pval, n = fit
-        xs = np.array([d["elevation_m"].min(), d["elevation_m"].max()])
-        ax.plot(xs, intercept + slope * xs, color="#b3331c", lw=2.0,
-                label="Theil-Sen fit: %+.2f mm per 100 m" % (slope * 100))
-        ax.annotate("Kendall tau = %.3f\np = %.1e\nn = %d stations" % (tau, pval, n),
+        xs = np.linspace(d["elevation_m"].min(), d["elevation_m"].max(), 50)
+        # the confidence wedge: the lowest and highest slopes consistent with
+        # the data, both pivoted about the median point the fit passes through
+        lo_line = fit["ymed"] + fit["lo"] * (xs - fit["xmed"])
+        up_line = fit["ymed"] + fit["up"] * (xs - fit["xmed"])
+        ax.fill_between(xs, lo_line, up_line, color="#b3331c", alpha=0.15, lw=0,
+                        label="%g%% confidence interval on the slope"
+                              % (100 * (1 - SLOPE_CI_ALPHA)))
+        ax.plot(xs, fit["intercept"] + fit["slope"] * xs, color="#b3331c", lw=2.0,
+                label="Theil-Sen fit: %+.2f mm per 100 m" % (fit["slope"] * 100))
+        ax.annotate("Kendall tau = %.3f\np = %.1e\nslope %+.2f mm/100 m\n"
+                    "%g%% CI  %+.2f to %+.2f\nn = %d stations"
+                    % (fit["tau"], fit["p"], fit["slope"] * 100,
+                       100 * (1 - SLOPE_CI_ALPHA), fit["lo"] * 100, fit["up"] * 100,
+                       fit["n"]),
                     xy=(0.985, 0.96), xycoords="axes fraction", ha="right", va="top",
                     fontsize=9, bbox=dict(boxstyle="round,pad=0.45", fc="white",
                                           ec="#bbbbbb", alpha=0.92))
 
-    # Name the extreme stations so they are not anonymous points.
     lo, hi = d["max_swe_bias"].min(), d["max_swe_bias"].max()
     pad = 0.18 * (hi - lo)
     ax.set_ylim(lo - pad, hi + pad)
@@ -482,14 +656,17 @@ def fig_bias_vs_elevation(ev: pd.DataFrame, meta: pd.DataFrame, label: str, plt)
     ax.set_title("Model bias in peak SWE against station elevation, %s" % label,
                  fontsize=13)
     ax.grid(alpha=0.25, lw=0.5)
-    ax.legend(loc="lower left", framealpha=0.9)
+    ax.legend(loc="lower left", framealpha=0.9, fontsize=8.5)
 
     caption = (
         "Bias = mean over all hydrological years of (modelled peak SWE - observed peak SWE) at that station. "
         "Negative means the model holds less snow than was measured.\n"
-        "The line is a Theil-Sen fit (median of the slopes of all station pairs) and the test is Mann-Kendall, "
-        "both chosen because a few isolated summit stations have extreme bias and would dominate an ordinary least-squares fit. "
-        "Those stations are labelled; the relationship holds with them removed."
+        "The shaded wedge here IS a confidence interval, unlike the percentile bands on the annual series figure: "
+        "it shows the range of slopes consistent with the data, so it answers how well determined the slope is, "
+        "not how much the stations differ.\n"
+        "Theil-Sen takes the median of the slopes of all station pairs and Mann-Kendall tests the ranking, both "
+        "chosen because a few isolated summit stations would dominate an ordinary least-squares fit. Those stations "
+        "are labelled; the relationship holds with them removed."
     )
     _caption(fig, caption)
 
@@ -532,7 +709,7 @@ def fig_trend_vs_elevation(tr: pd.DataFrame, meta: pd.DataFrame, label: str, plt
     plt.close(fig)
 
 
-def make_figures(ann: pd.DataFrame, tr: pd.DataFrame, ev: pd.DataFrame,
+def make_figures(pct: pd.DataFrame, tr: pd.DataFrame, ev: pd.DataFrame,
                  meta: pd.DataFrame, label: str) -> None:
     try:
         import matplotlib
@@ -545,11 +722,13 @@ def make_figures(ann: pd.DataFrame, tr: pd.DataFrame, ev: pd.DataFrame,
     FIGURES.mkdir(parents=True, exist_ok=True)
     TREND_FIGURES.mkdir(parents=True, exist_ok=True)
 
-    fig_annual_series(ann, label, plt)
+    fig_annual_series(pct, label, plt)
+    fig_annual_spread(pct, label, plt)
     fig_bias_vs_elevation(ev, meta, label, plt)
     fig_trend_vs_elevation(tr, meta, label, plt)
-    print("  figures -> annual_series_%s.png, bias_vs_elevation_%s.png, "
-          "trend_vs_elevation_%s.png" % (label, label, label))
+    print("  figures -> annual_series_%s.png, annual_spread_%s.png,"
+          " bias_vs_elevation_%s.png, trend_vs_elevation_%s.png"
+          % (label, label, label, label))
 
 
 # --- Main -------------------------------------------------------------------
@@ -588,6 +767,7 @@ def main():
         tr = trends(sm, hys)
         ts = trend_summary(tr)
         ann = annual_series(sm)
+        pct = annual_percentiles(sm)
         eb = elevation_bands(ev, meta)
 
         sm.merge(meta, on="station_id", how="left") \
@@ -598,6 +778,7 @@ def main():
           .to_csv(TRENDS / f"trends_{label}.csv", index=False)
         ts.to_csv(TRENDS / f"trend_summary_{label}.csv", index=False)
         ann.to_csv(TABLES / f"annual_series_{label}.csv", index=False)
+        pct.to_csv(TABLES / f"annual_percentiles_{label}.csv", index=False)
         eb.to_csv(TABLES / f"elevation_bands_{label}.csv", index=False)
 
         ev_num = ev.select_dtypes(include=[np.number])
@@ -634,7 +815,7 @@ def main():
               f"r = {ev_num['max_swe_r'].mean():.2f}")
 
         if MAKE_FIGURES:
-            make_figures(ann, tr, ev, meta, label)
+            make_figures(pct, tr, ev, meta, label)
 
     comp = pd.DataFrame(comparison)
     comp.to_csv(TABLES / "period_comparison.csv", index=False)

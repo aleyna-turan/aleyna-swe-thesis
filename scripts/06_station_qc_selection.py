@@ -228,7 +228,7 @@ def _caption(fig, text: str, base_bottom: float = 0.09) -> None:
     # Wrap to the figure width and reserve bottom margin, so a long caption
     # is never clipped at the right edge.
     import textwrap
-    width = int(fig.get_figwidth() * 17)
+    width = int(fig.get_figwidth() * 15)
     lines = []
     for para in text.split("\n"):
         lines.extend(textwrap.wrap(para, width=width) or [""])

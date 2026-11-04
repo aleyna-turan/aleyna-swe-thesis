@@ -1,0 +1,126 @@
+PIPELINE VERIFICATION REPORT
+Generated 2026-11-03 16:26
+Repository: /Users/aleynaturan/Desktop/a/aleyna-swe-thesis
+
+This report is produced by scripts/99_verify_pipeline.py, which reads
+the repository and changes nothing. Every PASS below is a check that
+was actually run against the files, not an assertion.
+
+==============================================================================
+A. INPUT INTEGRITY — the file everything else is built from
+==============================================================================
+
+  Why: results/tables/00_inputs/modelled_vs_observed_swe.csv is the
+  single source for every figure and table. Scripts 06, 07 and 08 all
+  read it. If it is wrong or has changed, everything downstream is
+  wrong, so it is checked first.
+
+  Reading modelled_vs_observed_swe.csv ...
+  [PASS] paired table loads (1,981,138 rows)
+  [PASS] plain .csv matches committed .csv.gz
+         both md5 1d12cbbc8e17097b5e1c6d35491cdb53
+  [PASS] no duplicate station-date pairs
+  [PASS] date range 1895-07-05 to 2025-12-29, 1147 stations
+
+==============================================================================
+B. THE PAIRING RULE — no observation means no row
+==============================================================================
+
+  Why: script 03 pulled the modelled value only on dates where the
+  station actually measured. A missing observation therefore produces
+  NO ROW, rather than a row with a blank. This matters because the
+  model is then only ever judged where a measurement exists. If
+  modelled values had been taken from the full daily series instead,
+  the model would look snowier purely from denser sampling.
+
+  [PASS] every row has an observed value
+  [PASS] no row inside the model period (1950-01-01 onward) is missing a modelled value
+  [note] 104,299 rows predate the model and carry no modelled
+         value. The mHM file begins 1950-01-01; CHMI
+         observations begin 1895-07-05. Every study
+         period starts in 1956 or later, and scripts 07 and 08 drop
+         rows with no modelled value, so these never reach a result.
+         Diagnosed in full: results/BLANK_MODELLED_DIAGNOSIS.txt
+  [PASS] the 1970 measurement-day switch is present in the data
+         before 1970: 96.4% of observations on Fri
+         after  1971: 99.7% of observations on Mon
+         This is why scripts homogenise per year instead of assuming Monday.
+
+==============================================================================
+C. SETTINGS — read from the scripts as they stand right now
+==============================================================================
+
+  Why: the thesis will state these numbers. They are read from the
+  source files rather than quoted from memory, so the report cannot
+  drift away from the code.
+
+  SNOW_THRESHOLD_MM                = 5.0                    (in 07)
+  FREQUENCY_HOMOGENISATION         = "dominant"             (in 06, 07, 08)
+  MIN_OBS_PER_SEASON               = 10                     (in 06)
+  MIN_COVERAGE                     = 0.90                   (in 06)
+  MAX_GAP_SEASONS                  = 3                      (in 06)
+  EDGE_TOLERANCE                   = 2                      (in 06)
+  MIN_MEDIAN_OBS                   = 15                     (in 06)
+  MAX_CV_OBS                       = 0.60                   (in 06)
+  MIN_YEARS_FRACTION_FOR_TREND     = 0.80                   (in 07)
+  ALPHA                            = 0.05                   (in 07)
+  MIN_OBS_PER_HY                   = 10                     (in 07, 08)
+  [PASS] snow threshold is 5 mm (the value justified by script 08)
+  [PASS] weekday homogenisation set to 'dominant' everywhere it appears
+
+==============================================================================
+D. FRESHNESS — is any output older than the script that makes it?
+==============================================================================
+
+  Why: an output file older than its own script was built by an
+  earlier version of the code. That is the definition of a stale plot.
+  00_inputs/ and archive/ are excluded: inputs come from scripts 02
+  and 03 and legitimately predate everything, and archive/ is kept
+  deliberately out of date.
+
+  [PASS] every output is newer than the script that produces it
+
+  Last build times by folder:
+    01_data_screening      2026-10-30 16:49  to  2026-10-30 16:49
+    02_model_evaluation    2026-10-30 16:49  to  2026-10-30 16:50
+    03_trends              2026-10-30 16:49  to  2026-10-30 16:50
+    04_threshold_tests     2026-10-30 16:50  to  2026-10-30 16:50
+
+==============================================================================
+E. CONSISTENCY — does the same station set appear everywhere?
+==============================================================================
+
+  Why: screening picks the stations. Every downstream table must
+  contain exactly that set. A mismatch means some table was built
+  from a different screening run, which would be invisible in a plot.
+
+  [PASS] 1956-2025: 62 selected | model_eval 62 | trends 62
+  [PASS] 1966-2025: 187 selected | model_eval 187 | trends 187
+  [PASS] 1976-2025: 235 selected | model_eval 235 | trends 235
+  [PASS] 1986-2025: 303 selected | model_eval 303 | trends 303
+  [PASS] period_comparison.csv station counts match screening
+
+==============================================================================
+F. ORPHANS — outputs not produced by any current script
+==============================================================================
+
+  Why: a file nobody regenerates cannot be reproduced, and should
+  either be rebuilt or moved to archive/ so it is not mistaken for
+  current output.
+
+  [PASS] no unexplained outputs in the live folders
+
+  Deliberately archived (superseded, not regenerated):
+    results/tables/archive/station_bias_metrics.csv
+    results/figures/archive/bias_vs_elevation_2026-07_R_superseded.png
+    results/figures/archive/long_term_average_swe.png
+
+==============================================================================
+SUMMARY
+==============================================================================
+
+  16 checks passed, 0 failed.
+
+  All checks passed. Every figure and table in the live folders
+  was built by the current scripts from the current input data,
+  and the station sets agree across every stage.

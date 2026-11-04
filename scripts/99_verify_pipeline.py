@@ -67,6 +67,12 @@ REPORT = REPO_ROOT / "results" / "VERIFICATION_REPORT.txt"
 MAIN_PERIOD = "1976-2025"
 PERIODS = ["1956-2025", "1966-2025", "1976-2025", "1986-2025"]
 
+# First date in the mHM NetCDF (snowpack_czechia_19500101_20260531.nc).
+# CHMI observations reach back to 1895, so observations before this date have
+# no modelled counterpart and carry a blank. That is a property of the model's
+# coverage, not a fault in the pairing — see results/BLANK_MODELLED_DIAGNOSIS.txt
+MODEL_START = pd.Timestamp("1950-01-01")
+
 _lines = []
 
 
@@ -161,14 +167,31 @@ def check_pairing(df):
         return
 
     n_obs_na = int(df["observed_swe_mm"].isna().sum())
-    n_mod_na = int(df["modelled_swe_mm"].isna().sum())
-
     results.append(check(n_obs_na == 0,
                          "every row has an observed value",
                          f"{n_obs_na} rows with blank observed" if n_obs_na else ""))
-    results.append(check(n_mod_na == 0,
-                         "every row has a modelled value",
-                         f"{n_mod_na} rows with blank modelled" if n_mod_na else ""))
+
+    # A modelled value can only exist from the model's own start date. Testing
+    # "every row has a modelled value" would therefore fail on observations
+    # that predate the model, which is not a fault. The meaningful test is
+    # whether anything is missing INSIDE the model's coverage.
+    blank = df["modelled_swe_mm"].isna()
+    n_pre = int((blank & (df["date"] < MODEL_START)).sum())
+    n_inside = int((blank & (df["date"] >= MODEL_START)).sum())
+
+    results.append(check(
+        n_inside == 0,
+        f"no row inside the model period ({MODEL_START.date()} onward) "
+        f"is missing a modelled value",
+        f"{n_inside:,} rows blank inside the model period" if n_inside else ""))
+
+    if n_pre:
+        say(f"  [note] {n_pre:,} rows predate the model and carry no modelled")
+        say(f"         value. The mHM file begins {MODEL_START.date()}; CHMI")
+        say(f"         observations begin {df['date'].min().date()}. Every study")
+        say("         period starts in 1956 or later, and scripts 07 and 08 drop")
+        say("         rows with no modelled value, so these never reach a result.")
+        say("         Diagnosed in full: results/BLANK_MODELLED_DIAGNOSIS.txt")
 
     # sampling pattern: weekly measurement means one dominant weekday per era
     dow = df["date"].dt.dayofweek
