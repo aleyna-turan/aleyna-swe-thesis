@@ -1,0 +1,25 @@
+metric,metric_name,unit,band,band_from_m,band_to_m,source,n_stations,median_trend,q25,q75,n_significant,n_significant_negative
+max_swe,Peak SWE,mm per decade,Lowland (<= 400 m),0,400.0,observed,83,-2.5,-3.902,-1.274,39,38
+max_swe,Peak SWE,mm per decade,Lowland (<= 400 m),0,400.0,modelled,83,-2.372,-3.346,-1.627,37,37
+max_swe,Peak SWE,mm per decade,Upland (400-700 m),400,700.0,observed,130,-3.296,-5.371,-1.808,45,45
+max_swe,Peak SWE,mm per decade,Upland (400-700 m),400,700.0,modelled,130,-3.246,-5.543,-2.279,70,70
+max_swe,Peak SWE,mm per decade,Mountain (> 700 m),700,,observed,22,-11.642,-17.295,-6.766,12,12
+max_swe,Peak SWE,mm per decade,Mountain (> 700 m),700,,modelled,22,-12.354,-16.252,-7.366,17,17
+snow_duration,Snow season length,days per decade,Lowland (<= 400 m),0,400.0,observed,83,-5.833,-8.511,-3.509,28,28
+snow_duration,Snow season length,days per decade,Lowland (<= 400 m),0,400.0,modelled,83,-6.364,-9.439,-4.189,39,39
+snow_duration,Snow season length,days per decade,Upland (400-700 m),400,700.0,observed,130,-8.75,-11.084,-5.875,80,80
+snow_duration,Snow season length,days per decade,Upland (400-700 m),400,700.0,modelled,130,-8.75,-11.024,-6.364,87,87
+snow_duration,Snow season length,days per decade,Mountain (> 700 m),700,,observed,22,-7.875,-9.283,-5.0,11,11
+snow_duration,Snow season length,days per decade,Mountain (> 700 m),700,,modelled,22,-9.6,-10.971,-7.892,20,20
+dohy_first_snow,Season onset,days per decade,Lowland (<= 400 m),0,400.0,observed,83,2.609,0.0,5.0,12,0
+dohy_first_snow,Season onset,days per decade,Lowland (<= 400 m),0,400.0,modelled,83,4.118,1.682,5.0,17,0
+dohy_first_snow,Season onset,days per decade,Upland (400-700 m),400,700.0,observed,130,3.146,2.0,4.886,16,0
+dohy_first_snow,Season onset,days per decade,Upland (400-700 m),400,700.0,modelled,130,4.314,2.112,5.0,29,0
+dohy_first_snow,Season onset,days per decade,Mountain (> 700 m),700,,observed,22,2.506,2.021,3.274,3,0
+dohy_first_snow,Season onset,days per decade,Mountain (> 700 m),700,,modelled,22,3.037,2.013,3.887,5,0
+dohy_last_snow,Melt-out date,days per decade,Lowland (<= 400 m),0,400.0,observed,83,-4.286,-5.946,-3.413,13,13
+dohy_last_snow,Melt-out date,days per decade,Lowland (<= 400 m),0,400.0,modelled,83,-3.75,-5.504,-2.319,14,14
+dohy_last_snow,Melt-out date,days per decade,Upland (400-700 m),400,700.0,observed,130,-6.522,-7.956,-4.599,69,69
+dohy_last_snow,Melt-out date,days per decade,Upland (400-700 m),400,700.0,modelled,130,-5.034,-6.667,-3.75,51,51
+dohy_last_snow,Melt-out date,days per decade,Mountain (> 700 m),700,,observed,22,-4.345,-6.463,-3.41,10,10
+dohy_last_snow,Melt-out date,days per decade,Mountain (> 700 m),700,,modelled,22,-6.667,-7.934,-5.329,17,17
